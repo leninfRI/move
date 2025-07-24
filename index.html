@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>移動距離折扣產生器</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 JsBarcode 套件 -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+        }
+        /* 自訂動畫 */
+        @keyframes pulse-bg {
+            0%, 100% { background-color: #10B981; } /* emerald-500 */
+            50% { background-color: #34D399; } /* emerald-400 */
+        }
+        .tracking-active {
+            animation: pulse-bg 2s infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-6 md:p-8 space-y-6">
+        
+        <!-- 標題區 -->
+        <div class="text-center">
+            <h1 class="text-2xl md:text-3xl font-bold text-gray-800">移動換折扣</h1>
+            <p class="text-gray-500 mt-2">開始移動，累積您的專屬折扣！</p>
+        </div>
+
+        <!-- 數據顯示區 -->
+        <div class="bg-gray-50 p-6 rounded-xl text-center space-y-4">
+            <div>
+                <p class="text-sm font-medium text-gray-500">目前累積距離</p>
+                <p id="distanceDisplay" class="text-4xl font-bold text-emerald-600">0.00 公尺</p>
+            </div>
+            <div>
+                <p class="text-sm font-medium text-gray-500">可獲得折扣</p>
+                <p id="discountDisplay" class="text-3xl font-bold text-indigo-600">NT$ 0</p>
+            </div>
+        </div>
+
+        <!-- 狀態訊息 -->
+        <div id="statusMessage" class="text-center text-sm text-red-500 h-5"></div>
+
+        <!-- 控制按鈕區 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button id="startButton" class="w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-transform transform hover:scale-105">
+                開始記錄
+            </button>
+            <button id="generateButton" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105" disabled>
+                產生折扣碼
+            </button>
+        </div>
+
+        <!-- 條碼顯示區 -->
+        <div id="barcodeContainer" class="hidden text-center pt-4 border-t border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">您的專屬折扣碼</h3>
+            <svg id="barcode"></svg>
+            <p id="barcodeValue" class="text-xs text-gray-500 mt-1"></p>
+        </div>
+
+    </div>
+
+    <script>
+        // DOM 元素
+        const distanceDisplay = document.getElementById('distanceDisplay');
+        const discountDisplay = document.getElementById('discountDisplay');
+        const startButton = document.getElementById('startButton');
+        const generateButton = document.getElementById('generateButton');
+        const barcodeContainer = document.getElementById('barcodeContainer');
+        const barcodeValue = document.getElementById('barcodeValue');
+        const statusMessage = document.getElementById('statusMessage');
+        const mainContainer = document.querySelector('.w-full');
+
+        // 應用程式狀態
+        let watchId = null;
+        let totalDistance = 0;
+        let lastPosition = null;
+        let isTracking = false;
+
+        // 折扣規則：每 10 公尺折 1 元
+        const METERS_PER_DISCOUNT_UNIT = 10;
+        const DISCOUNT_AMOUNT_PER_UNIT = 1;
+
+        // 開始/停止按鈕事件監聽
+        startButton.addEventListener('click', () => {
+            if (isTracking) {
+                stopTracking();
+            } else {
+                startTracking();
+            }
+        });
+
+        // 產生條碼按鈕事件監聽
+        generateButton.addEventListener('click', generateBarcode);
+
+        // 開始追蹤
+        function startTracking() {
+            if (!navigator.geolocation) {
+                updateStatus('您的瀏覽器不支援地理位置功能', true);
+                return;
+            }
+
+            // 請求位置權限並開始監控
+            const options = {
+                enableHighAccuracy: true, // 請求高精準度位置
+                timeout: 10000,           // 10秒超時
+                maximumAge: 0             // 不使用快取位置
+            };
+
+            watchId = navigator.geolocation.watchPosition(handlePositionUpdate, handleError, options);
+            
+            isTracking = true;
+            updateStatus('正在記錄您的移動...', false);
+            mainContainer.classList.add('tracking-active');
+            startButton.textContent = '停止記錄';
+            startButton.classList.remove('bg-emerald-500', 'hover:bg-emerald-600');
+            startButton.classList.add('bg-red-500', 'hover:bg-red-600');
+            generateButton.disabled = false;
+            barcodeContainer.classList.add('hidden'); // 重新開始時隱藏舊條碼
+        }
+
+        // 停止追蹤
+        function stopTracking() {
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+            }
+            isTracking = false;
+            watchId = null;
+            lastPosition = null; // 清除上次位置，以便下次重新開始
+            updateStatus('已停止記錄', false);
+            mainContainer.classList.remove('tracking-active');
+            startButton.textContent = '開始記錄';
+            startButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+            startButton.classList.add('bg-emerald-500', 'hover:bg-emerald-600');
+        }
+
+        // 處理位置更新
+        function handlePositionUpdate(position) {
+            const { latitude, longitude } = position.coords;
+            
+            if (lastPosition) {
+                const distance = haversineDistance(lastPosition, { latitude, longitude });
+                totalDistance += distance;
+            }
+            
+            lastPosition = { latitude, longitude };
+            updateUI();
+        }
+
+        // 處理錯誤
+        function handleError(error) {
+            stopTracking();
+            let message = '無法取得您的位置。';
+            if (error.code === error.PERMISSION_DENIED) {
+                message = '您已拒絕位置存取權限。請至瀏覽器設定開啟。';
+            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                message = '目前無法偵測到您的位置。';
+            } else if (error.code === error.TIMEOUT) {
+                message = '取得位置資訊超時。';
+            }
+            updateStatus(message, true);
+        }
+
+        // 更新 UI 顯示
+        function updateUI() {
+            distanceDisplay.textContent = `${totalDistance.toFixed(2)} 公尺`;
+            const discount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
+            discountDisplay.textContent = `NT$ ${discount}`;
+        }
+        
+        // 更新狀態訊息
+        function updateStatus(message, isError) {
+            statusMessage.textContent = message;
+            statusMessage.style.color = isError ? '#EF4444' : '#10B981'; // red-500 or emerald-500
+        }
+
+        // 產生條碼
+        function generateBarcode() {
+            if (isTracking) {
+                stopTracking();
+            }
+
+            const finalDiscount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
+            if (finalDiscount <= 0) {
+                updateStatus('尚未累積任何折扣，無法產生條碼', true);
+                return;
+            }
+
+            // 產生一個獨特的條碼值，例如：MOVE-折扣金額-時間戳
+            const timestamp = Date.now();
+            const code = `MOVE-${finalDiscount}-${timestamp}`;
+
+            JsBarcode("#barcode", code, {
+                format: "CODE128",
+                lineColor: "#000",
+                width: 2,
+                height: 80,
+                displayValue: false // 我們自己顯示條碼值
+            });
+            
+            barcodeValue.textContent = code;
+            barcodeContainer.classList.remove('hidden');
+            generateButton.disabled = true; // 產生後禁用，避免重複產生
+            updateStatus('已成功產生折扣碼！', false);
+        }
+
+        /**
+         * 使用半正矢公式計算兩點間的距離（單位：公尺）
+         * @param {{latitude: number, longitude: number}} pos1 - 點 1
+         * @param {{latitude: number, longitude: number}} pos2 - 點 2
+         * @returns {number} 距離（公尺）
+         */
+        function haversineDistance(pos1, pos2) {
+            const R = 6371e3; // 地球半徑（公尺）
+            const φ1 = pos1.latitude * Math.PI / 180; // φ, λ in radians
+            const φ2 = pos2.latitude * Math.PI / 180;
+            const Δφ = (pos2.latitude - pos1.latitude) * Math.PI / 180;
+            const Δλ = (pos2.longitude - pos1.longitude) * Math.PI / 180;
+
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c; // 距離（公尺）
+        }
+
+    </script>
+</body>
+</html>
