@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (Supabase 安全版V0.10)</title>
+    <title>移動距離折扣產生器 (V0.11)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -50,7 +50,6 @@
             <div id="map"></div>
         </div>
 
-        <!-- REVERTED: 恢復顯示即時距離與折扣 -->
         <div class="bg-gray-50 p-6 rounded-xl text-center space-y-4">
             <div>
                 <p class="text-sm font-medium text-gray-500">目前累積距離 (預估)</p>
@@ -104,31 +103,32 @@
             barcodeValue: document.getElementById('barcodeValue'),
             statusMessage: document.getElementById('statusMessage'),
             mapContainer: document.getElementById('mapContainer'),
-            mainCard: document.querySelector('.w-full.max-w-md')
         };
 
         // --- 應用程式狀態 ---
         let supabase = null;
         let currentUser = null;
+        
+        // NEW: 用於儲存從後端讀取的動態設定
+        let appSettings = {
+            METERS_PER_DISCOUNT_UNIT: 10,
+            DISCOUNT_AMOUNT_PER_UNIT: 1,
+            MIN_GPS_ACCURACY: 25,
+            MIN_DISTANCE_THRESHOLD: 5,
+        };
 
         let watchId = null;
         let isTracking = false;
-        let collectedPoints = []; // 依然收集原始座標點，用於後端驗證
-        let totalDistance = 0;    // 新增：用於前端預估顯示
-        let lastPosition = null;  // 新增：用於前端預估顯示
+        let collectedPoints = [];
+        let totalDistance = 0;
+        let lastPosition = null;
 
         let map = null;
         let userMarker = null;
         let pathPolyline = null;
         
-        // --- 常數設定 (前後端需同步) ---
-        const METERS_PER_DISCOUNT_UNIT = 10;
-        const DISCOUNT_AMOUNT_PER_UNIT = 1;
-        const MIN_GPS_ACCURACY = 25;
-        const MIN_DISTANCE_THRESHOLD = 5;
-
         // --- 初始化 ---
-        function initializeSupabase() {
+        async function initializeSupabase() {
             if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL === 'YOUR_SUPABASE_URL') {
                 updateStatus('請在程式碼中填寫您的 Supabase 設定', true);
                 updateAuthUI('failed');
@@ -137,14 +137,38 @@
             try {
                 supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                 
-                supabase.auth.onAuthStateChange((event, session) => {
+                // 監聽認證狀態變化
+                supabase.auth.onAuthStateChange(async (event, session) => {
                     currentUser = session?.user ?? null;
+                    if (currentUser) {
+                        // 登入後，嘗試從後端獲取最新設定
+                        await fetchAppSettings();
+                    }
                     updateAuthUI('success');
                 });
 
             } catch (error) {
                 updateStatus('Supabase 初始化失敗', true);
                 updateAuthUI('failed');
+            }
+        }
+
+        // NEW: 從後端讀取應用程式設定
+        async function fetchAppSettings() {
+            if (!supabase || !currentUser) return;
+            
+            updateStatus('正在同步後台設定...', false);
+            const { data, error } = await supabase.from('settings').select('key, value');
+
+            if (error) {
+                updateStatus('讀取後台設定失敗，將使用預設值', true);
+                console.error('Fetch settings error:', error);
+            } else if (data) {
+                // 將讀取到的設定更新到 appSettings 物件中
+                data.forEach(setting => {
+                    appSettings[setting.key] = parseFloat(setting.value) || setting.value;
+                });
+                updateStatus('後台設定同步完成！', false);
             }
         }
 
@@ -181,10 +205,10 @@
             }
         }
         
-        // REVERTED: 恢復顯示即時距離與折扣
         function updateTrackingUI() {
             elements.distanceDisplay.textContent = `${totalDistance.toFixed(2)} 公尺`;
-            const discount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
+            // 使用從後端讀取的動態設定來計算預估折扣
+            const discount = Math.floor(totalDistance / appSettings.METERS_PER_DISCOUNT_UNIT) * appSettings.DISCOUNT_AMOUNT_PER_UNIT;
             elements.discountDisplay.textContent = `NT$ ${discount}`;
         }
 
@@ -204,7 +228,6 @@
                 return;
             }
             
-            // 重設所有相關狀態
             collectedPoints = [];
             totalDistance = 0;
             lastPosition = null;
@@ -216,7 +239,6 @@
             
             isTracking = true;
             updateStatus('正在記錄您的移動...', false);
-            elements.mainCard.classList.add('tracking-active-bg');
             elements.startButton.textContent = '停止記錄';
             elements.startButton.className = 'w-full bg-red-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-600';
             elements.generateButton.disabled = false;
@@ -228,20 +250,16 @@
             isTracking = false;
             watchId = null;
             updateStatus('已停止記錄', false);
-            elements.mainCard.classList.remove('tracking-active-bg');
             elements.startButton.textContent = '開始記錄';
             elements.startButton.className = 'w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600';
         }
 
-        // REVERTED: 恢復前端的即時計算邏輯
         function handlePositionUpdate(position) {
             const { latitude, longitude, speed, accuracy, timestamp } = position.coords;
-
-            // 1. 依然收集原始點，用於後端驗證
             collectedPoints.push({ latitude, longitude, speed, accuracy, timestamp });
             
-            // 2. 在前端執行預估計算
-            if (accuracy > MIN_GPS_ACCURACY) {
+            // 使用從後端讀取的動態設定來進行前端預估
+            if (accuracy > appSettings.MIN_GPS_ACCURACY) {
                 updateStatus(`GPS訊號不穩定 (誤差: ${accuracy.toFixed(0)}公尺)，暫停計算`, true);
                 return;
             }
@@ -250,7 +268,7 @@
 
             if (lastPosition) {
                 const distance = haversineDistance(lastPosition, currentPosition);
-                if (distance > MIN_DISTANCE_THRESHOLD) {
+                if (distance > appSettings.MIN_DISTANCE_THRESHOLD) {
                     totalDistance += distance;
                     updateMap(latitude, longitude);
                     lastPosition = currentPosition;
@@ -261,7 +279,6 @@
                 updateMap(latitude, longitude);
             }
             
-            // 3. 更新前端UI顯示
             updateTrackingUI();
         }
 
@@ -270,7 +287,7 @@
             updateStatus(error.code === 1 ? '您已拒絕位置存取權限。' : '無法取得您的位置。', true);
         }
         
-        // --- 折扣碼產生 (呼叫後端，此部分維持不變) ---
+        // --- 折扣碼產生 (呼叫後端) ---
         async function generateBarcode() {
             if (isTracking) stopTracking();
             if (collectedPoints.length < 2) {
@@ -282,14 +299,12 @@
             elements.generateButton.disabled = true;
 
             try {
-                // 呼叫後端函式，傳送的是原始數據 collectedPoints
                 const { data, error } = await supabase.functions.invoke('calculateAndSaveDiscount', {
                     body: { points: collectedPoints },
                 });
 
                 if (error) throw error;
 
-                // 根據後端回傳的結果產生條碼
                 if (data.success) {
                     JsBarcode("#barcode", data.barcodeId, { format: "CODE128", lineColor: "#000", width: 2, height: 80, displayValue: false });
                     elements.barcodeValue.textContent = data.barcodeId;
@@ -307,7 +322,6 @@
         }
         
         // --- 地圖與其他輔助函式 ---
-        // 新增：Haversine 公式，用於前端預估
         function haversineDistance(pos1, pos2) {
             const R = 6371e3;
             const toRad = (num) => num * Math.PI / 180;
