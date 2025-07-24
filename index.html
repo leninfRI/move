@@ -3,36 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器</title>
-    <!-- 引入 Tailwind CSS -->
+    <title>移動距離折扣產生器 (進階版)</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 JsBarcode 套件 -->
+    
+    <!-- JsBarcode -->
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    
+    <!-- Leaflet.js (for Map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    
     <style>
         body {
             font-family: 'Noto Sans TC', sans-serif;
+        }
+        #map { 
+            height: 250px; 
+            width: 100%;
+            border-radius: 0.75rem; /* rounded-xl */
+            border: 1px solid #e5e7eb; /* border-gray-200 */
         }
         /* 自訂動畫 */
         @keyframes pulse-bg {
             0%, 100% { background-color: #10B981; } /* emerald-500 */
             50% { background-color: #34D399; } /* emerald-400 */
         }
-        .tracking-active {
+        .tracking-active-bg {
             animation: pulse-bg 2s infinite;
         }
     </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
 
     <div class="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-6 md:p-8 space-y-6">
         
-        <!-- 標題區 -->
-        <div class="text-center">
-            <h1 class="text-2xl md:text-3xl font-bold text-gray-800">移動換折扣</h1>
-            <p class="text-gray-500 mt-2">開始移動，累積您的專屬折扣！</p>
+        <!-- 標題與使用者狀態 -->
+        <div class="flex justify-between items-start">
+            <div class="text-left">
+                <h1 class="text-2xl md:text-3xl font-bold text-gray-800">移動換折扣</h1>
+                <p class="text-gray-500 mt-1">開始移動，累積您的專屬折扣！</p>
+            </div>
+            <div id="authContainer" class="text-right">
+                 <!-- 登入/登出按鈕會被動態插入這裡 -->
+            </div>
+        </div>
+        <div id="userInfo" class="text-xs text-gray-400 truncate">尚未登入</div>
+
+        <!-- 地圖顯示區 -->
+        <div id="mapContainer" class="hidden">
+            <div id="map"></div>
         </div>
 
         <!-- 數據顯示區 -->
@@ -52,7 +78,7 @@
 
         <!-- 控制按鈕區 -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <button id="startButton" class="w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-transform transform hover:scale-105">
+            <button id="startButton" class="w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-transform transform hover:scale-105" disabled>
                 開始記錄
             </button>
             <button id="generateButton" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105" disabled>
@@ -62,166 +88,286 @@
 
         <!-- 條碼顯示區 -->
         <div id="barcodeContainer" class="hidden text-center pt-4 border-t border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-700 mb-2">您的專屬折扣碼</h3>
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">您的專屬折扣碼 (可驗證)</h3>
             <svg id="barcode"></svg>
             <p id="barcodeValue" class="text-xs text-gray-500 mt-1"></p>
         </div>
 
     </div>
 
-    <script>
-        // DOM 元素
-        const distanceDisplay = document.getElementById('distanceDisplay');
-        const discountDisplay = document.getElementById('discountDisplay');
-        const startButton = document.getElementById('startButton');
-        const generateButton = document.getElementById('generateButton');
-        const barcodeContainer = document.getElementById('barcodeContainer');
-        const barcodeValue = document.getElementById('barcodeValue');
-        const statusMessage = document.getElementById('statusMessage');
-        const mainContainer = document.querySelector('.w-full');
+    <!-- Firebase SDK -->
+    <script type="module">
+        // 匯入 Firebase 模組
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 應用程式狀態
+        // --- DOM 元素 ---
+        const elements = {
+            authContainer: document.getElementById('authContainer'),
+            userInfo: document.getElementById('userInfo'),
+            distanceDisplay: document.getElementById('distanceDisplay'),
+            discountDisplay: document.getElementById('discountDisplay'),
+            startButton: document.getElementById('startButton'),
+            generateButton: document.getElementById('generateButton'),
+            barcodeContainer: document.getElementById('barcodeContainer'),
+            barcodeValue: document.getElementById('barcodeValue'),
+            statusMessage: document.getElementById('statusMessage'),
+            mapContainer: document.getElementById('mapContainer'),
+            mainCard: document.querySelector('.w-full.max-w-md')
+        };
+
+        // --- Firebase 設定 ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        // --- 應用程式狀態 ---
+        let app = null;
+        let auth = null;
+        let db = null;
+        let currentUser = null;
+
         let watchId = null;
         let totalDistance = 0;
         let lastPosition = null;
         let isTracking = false;
+        
+        let map = null;
+        let userMarker = null;
+        let pathPolyline = null;
+        let pathCoordinates = [];
 
-        // 折扣規則：每 10 公尺折 1 元
+        // --- 常數設定 ---
         const METERS_PER_DISCOUNT_UNIT = 10;
         const DISCOUNT_AMOUNT_PER_UNIT = 1;
+        const MAX_SPEED_KMH = 30; // 最高速限 (公里/小時)，用於防作弊
 
-        // 開始/停止按鈕事件監聽
-        startButton.addEventListener('click', () => {
-            if (isTracking) {
-                stopTracking();
-            } else {
-                startTracking();
+        // --- 初始化 ---
+        // FIX: Added 'function' keyword to correctly declare the function.
+        async function initializeAppAndAuth() {
+            // Add a check to ensure firebaseConfig is not empty
+            if (Object.keys(firebaseConfig).length === 0) {
+                updateStatus("Firebase 設定無效，無法初始化", true);
+                console.error("Firebase config is missing or empty.");
+                return;
             }
-        });
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                
+                onAuthStateChanged(auth, user => {
+                    if (user) {
+                        // 使用者已登入
+                        currentUser = user;
+                        updateAuthUI(true);
+                        elements.userInfo.textContent = `使用者ID: ${user.uid}`;
+                        elements.startButton.disabled = false;
+                    } else {
+                        // 使用者已登出
+                        currentUser = null;
+                        updateAuthUI(false);
+                        elements.userInfo.textContent = '尚未登入';
+                        elements.startButton.disabled = true;
+                        if(isTracking) stopTracking();
+                    }
+                });
 
-        // 產生條碼按鈕事件監聽
-        generateButton.addEventListener('click', generateBarcode);
+                // 自動使用提供的 token 登入
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                }
 
-        // 開始追蹤
+            } catch (e) {
+                console.error("Firebase 初始化失敗:", e);
+                updateStatus("後端服務連接失敗，請稍後再試", true);
+            }
+        }
+
+        // --- UI 更新函式 ---
+        function updateAuthUI(isLoggedIn) {
+            elements.authContainer.innerHTML = ''; // 清空容器
+            if (isLoggedIn) {
+                const logoutButton = document.createElement('button');
+                logoutButton.textContent = '登出';
+                logoutButton.className = 'bg-gray-200 text-gray-700 text-sm font-bold py-1 px-3 rounded-lg hover:bg-gray-300';
+                logoutButton.onclick = () => signOut(auth);
+                elements.authContainer.appendChild(logoutButton);
+            } else {
+                const loginButton = document.createElement('button');
+                loginButton.textContent = '匿名登入';
+                loginButton.className = 'bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600';
+                loginButton.onclick = () => {
+                    signInAnonymously(auth).catch(err => {
+                        updateStatus(`登入失敗: ${err.message}`, true)
+                        console.error("Anonymous sign-in failed", err);
+                    });
+                }
+                elements.authContainer.appendChild(loginButton);
+            }
+        }
+
+        function updateTrackingUI() {
+            elements.distanceDisplay.textContent = `${totalDistance.toFixed(2)} 公尺`;
+            const discount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
+            elements.discountDisplay.textContent = `NT$ ${discount}`;
+        }
+
+        function updateStatus(message, isError) {
+            elements.statusMessage.textContent = message;
+            elements.statusMessage.style.color = isError ? '#EF4444' : '#10B981';
+        }
+
+        // --- 地圖函式 ---
+        function initMap(lat, lon) {
+            if (map) return; // 如果地圖已存在，則不重複初始化
+            elements.mapContainer.classList.remove('hidden');
+            map = L.map('map').setView([lat, lon], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            userMarker = L.marker([lat, lon]).addTo(map).bindPopup('你的位置').openPopup();
+            pathPolyline = L.polyline(pathCoordinates, {color: 'blue'}).addTo(map);
+        }
+
+        function updateMap(lat, lon) {
+            if (!map) {
+                initMap(lat, lon);
+            } else {
+                const newLatLng = new L.LatLng(lat, lon);
+                map.setView(newLatLng, map.getZoom());
+                userMarker.setLatLng(newLatLng);
+                pathCoordinates.push(newLatLng);
+                pathPolyline.setLatLngs(pathCoordinates);
+            }
+        }
+
+        function resetMap() {
+            elements.mapContainer.classList.add('hidden');
+            if (map) {
+                map.remove();
+                map = null;
+            }
+            pathCoordinates = [];
+        }
+
+        // --- 核心追蹤邏輯 ---
         function startTracking() {
             if (!navigator.geolocation) {
                 updateStatus('您的瀏覽器不支援地理位置功能', true);
                 return;
             }
+            if (!currentUser) {
+                updateStatus('請先登入以開始記錄', true);
+                return;
+            }
+            
+            // 重設狀態
+            totalDistance = 0;
+            lastPosition = null;
+            resetMap();
+            updateTrackingUI();
 
-            // 請求位置權限並開始監控
-            const options = {
-                enableHighAccuracy: true, // 請求高精準度位置
-                timeout: 10000,           // 10秒超時
-                maximumAge: 0             // 不使用快取位置
-            };
-
+            const options = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 };
             watchId = navigator.geolocation.watchPosition(handlePositionUpdate, handleError, options);
             
             isTracking = true;
             updateStatus('正在記錄您的移動...', false);
-            mainContainer.classList.add('tracking-active');
-            startButton.textContent = '停止記錄';
-            startButton.classList.remove('bg-emerald-500', 'hover:bg-emerald-600');
-            startButton.classList.add('bg-red-500', 'hover:bg-red-600');
-            generateButton.disabled = false;
-            barcodeContainer.classList.add('hidden'); // 重新開始時隱藏舊條碼
+            elements.mainCard.classList.add('tracking-active-bg');
+            elements.startButton.textContent = '停止記錄';
+            elements.startButton.className = 'w-full bg-red-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500';
+            elements.generateButton.disabled = false;
+            elements.barcodeContainer.classList.add('hidden');
         }
 
-        // 停止追蹤
         function stopTracking() {
-            if (watchId) {
-                navigator.geolocation.clearWatch(watchId);
-            }
+            if (watchId) navigator.geolocation.clearWatch(watchId);
             isTracking = false;
             watchId = null;
-            lastPosition = null; // 清除上次位置，以便下次重新開始
             updateStatus('已停止記錄', false);
-            mainContainer.classList.remove('tracking-active');
-            startButton.textContent = '開始記錄';
-            startButton.classList.remove('bg-red-500', 'hover:bg-red-600');
-            startButton.classList.add('bg-emerald-500', 'hover:bg-emerald-600');
+            elements.mainCard.classList.remove('tracking-active-bg');
+            elements.startButton.textContent = '開始記錄';
+            elements.startButton.className = 'w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500';
         }
 
-        // 處理位置更新
         function handlePositionUpdate(position) {
-            const { latitude, longitude } = position.coords;
-            
+            const { latitude, longitude, speed } = position.coords;
+            const currentTimestamp = position.timestamp;
+
+            // 簡易防作弊：檢查速度
+            // Geolocation API 的 speed 單位是 公尺/秒
+            if (speed !== null && (speed * 3.6) > MAX_SPEED_KMH) {
+                 updateStatus(`偵測到過快速度 (${(speed * 3.6).toFixed(1)} km/h)，該段距離不予計算`, true);
+                 return; // 速度太快，忽略這次更新
+            }
+
+            updateMap(latitude, longitude);
+
             if (lastPosition) {
                 const distance = haversineDistance(lastPosition, { latitude, longitude });
                 totalDistance += distance;
             }
             
-            lastPosition = { latitude, longitude };
-            updateUI();
+            lastPosition = { latitude, longitude, timestamp: currentTimestamp };
+            updateTrackingUI();
         }
 
-        // 處理錯誤
         function handleError(error) {
             stopTracking();
             let message = '無法取得您的位置。';
-            if (error.code === error.PERMISSION_DENIED) {
-                message = '您已拒絕位置存取權限。請至瀏覽器設定開啟。';
-            } else if (error.code === error.POSITION_UNAVAILABLE) {
-                message = '目前無法偵測到您的位置。';
-            } else if (error.code === error.TIMEOUT) {
-                message = '取得位置資訊超時。';
-            }
+            if (error.code === 1) message = '您已拒絕位置存取權限。';
             updateStatus(message, true);
         }
 
-        // 更新 UI 顯示
-        function updateUI() {
-            distanceDisplay.textContent = `${totalDistance.toFixed(2)} 公尺`;
-            const discount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
-            discountDisplay.textContent = `NT$ ${discount}`;
-        }
-        
-        // 更新狀態訊息
-        function updateStatus(message, isError) {
-            statusMessage.textContent = message;
-            statusMessage.style.color = isError ? '#EF4444' : '#10B981'; // red-500 or emerald-500
-        }
-
-        // 產生條碼
-        function generateBarcode() {
-            if (isTracking) {
-                stopTracking();
-            }
+        // --- 折扣碼產生 ---
+        async function generateBarcode() {
+            if (isTracking) stopTracking();
 
             const finalDiscount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
             if (finalDiscount <= 0) {
                 updateStatus('尚未累積任何折扣，無法產生條碼', true);
                 return;
             }
+            if (!currentUser) {
+                updateStatus('請先登入以儲存您的折扣碼', true);
+                return;
+            }
 
-            // 產生一個獨特的條碼值，例如：MOVE-折扣金額-時間戳
-            const timestamp = Date.now();
-            const code = `MOVE-${finalDiscount}-${timestamp}`;
+            try {
+                updateStatus('正在產生並儲存折扣碼...', false);
+                // 將折扣資料寫入 Firestore
+                const docRef = await addDoc(collection(db, "discounts"), {
+                    userId: currentUser.uid,
+                    discountAmount: finalDiscount,
+                    totalDistance: totalDistance,
+                    createdAt: serverTimestamp(),
+                    status: 'issued' // 狀態：已發行
+                });
 
-            JsBarcode("#barcode", code, {
-                format: "CODE128",
-                lineColor: "#000",
-                width: 2,
-                height: 80,
-                displayValue: false // 我們自己顯示條碼值
-            });
-            
-            barcodeValue.textContent = code;
-            barcodeContainer.classList.remove('hidden');
-            generateButton.disabled = true; // 產生後禁用，避免重複產生
-            updateStatus('已成功產生折扣碼！', false);
+                const code = docRef.id; // 使用 Firestore 文件 ID 作為可驗證的條碼
+                JsBarcode("#barcode", code, {
+                    format: "CODE128",
+                    lineColor: "#000",
+                    width: 2,
+                    height: 80,
+                    displayValue: false
+                });
+                
+                elements.barcodeValue.textContent = code;
+                elements.barcodeContainer.classList.remove('hidden');
+                elements.generateButton.disabled = true;
+                updateStatus('已成功產生並儲存折扣碼！', false);
+
+            } catch (error) {
+                console.error("寫入 Firestore 失敗: ", error);
+                updateStatus('儲存折扣碼失敗，請檢查網路連線', true);
+            }
         }
 
-        /**
-         * 使用半正矢公式計算兩點間的距離（單位：公尺）
-         * @param {{latitude: number, longitude: number}} pos1 - 點 1
-         * @param {{latitude: number, longitude: number}} pos2 - 點 2
-         * @returns {number} 距離（公尺）
-         */
+        // --- 輔助函式 ---
         function haversineDistance(pos1, pos2) {
-            const R = 6371e3; // 地球半徑（公尺）
-            const φ1 = pos1.latitude * Math.PI / 180; // φ, λ in radians
+            const R = 6371e3; // 地球半徑 (公尺)
+            const φ1 = pos1.latitude * Math.PI / 180;
             const φ2 = pos2.latitude * Math.PI / 180;
             const Δφ = (pos2.latitude - pos1.latitude) * Math.PI / 180;
             const Δλ = (pos2.longitude - pos1.longitude) * Math.PI / 180;
@@ -230,9 +376,18 @@
                       Math.cos(φ1) * Math.cos(φ2) *
                       Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-            return R * c; // 距離（公尺）
+            return R * c;
         }
+
+        // --- 事件監聽 ---
+        elements.startButton.addEventListener('click', () => {
+            if (isTracking) stopTracking();
+            else startTracking();
+        });
+        elements.generateButton.addEventListener('click', generateBarcode);
+
+        // --- 啟動應用程式 ---
+        initializeAppAndAuth();
 
     </script>
 </body>
