@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (進階版V0.8)</title>
+    <title>移動距離折扣產生器 (Supabase 安全版V0.9)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,8 +12,8 @@
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     
     <!-- Leaflet.js (for Map) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,35 +21,20 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     
     <style>
-        body {
-            font-family: 'Noto Sans TC', sans-serif;
-        }
-        #map { 
-            height: 250px; 
-            width: 100%;
-            border-radius: 0.75rem; /* rounded-xl */
-            border: 1px solid #e5e7eb; /* border-gray-200 */
-        }
-        /* -- FIX: 讓條碼 SVG 響應式縮放 -- */
-        #barcode {
-            width: 100%;
-            height: auto;
-        }
-        /* 自訂動畫 */
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        #map { height: 250px; width: 100%; border-radius: 0.75rem; border: 1px solid #e5e7eb; }
+        #barcode { width: 100%; height: auto; }
         @keyframes pulse-bg {
-            0%, 100% { background-color: #10B981; } /* emerald-500 */
-            50% { background-color: #34D399; } /* emerald-400 */
+            0%, 100% { background-color: #10B981; }
+            50% { background-color: #34D399; }
         }
-        .tracking-active-bg {
-            animation: pulse-bg 2s infinite;
-        }
+        .tracking-active-bg { animation: pulse-bg 2s infinite; }
     </style>
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
 
     <div class="w-full max-w-md mx-auto bg-white rounded-2xl shadow-xl p-6 md:p-8 space-y-6">
         
-        <!-- 標題與使用者狀態 -->
         <div class="flex justify-between items-start">
             <div class="text-left">
                 <h1 class="text-2xl md:text-3xl font-bold text-gray-800">移動換折扣</h1>
@@ -61,72 +46,52 @@
         </div>
         <div id="userInfo" class="text-xs text-gray-400 truncate">尚未登入</div>
 
-        <!-- 地圖顯示區 -->
         <div id="mapContainer" class="hidden">
             <div id="map"></div>
         </div>
 
-        <!-- 數據顯示區 -->
         <div class="bg-gray-50 p-6 rounded-xl text-center space-y-4">
             <div>
-                <p class="text-sm font-medium text-gray-500">目前累積距離</p>
-                <p id="distanceDisplay" class="text-4xl font-bold text-emerald-600">0.00 公尺</p>
-            </div>
-            <div>
-                <p class="text-sm font-medium text-gray-500">可獲得折扣</p>
-                <p id="discountDisplay" class="text-3xl font-bold text-indigo-600">NT$ 0</p>
+                <p class="text-sm font-medium text-gray-500">已收集座標點</p>
+                <p id="pointsDisplay" class="text-4xl font-bold text-emerald-600">0 個</p>
             </div>
         </div>
 
-        <!-- 狀態訊息 -->
         <div id="statusMessage" class="text-center text-sm text-red-500 h-5"></div>
 
-        <!-- 控制按鈕區 -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <button id="startButton" class="w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition-transform transform hover:scale-105" disabled>
+            <button id="startButton" class="w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600" disabled>
                 開始記錄
             </button>
-            <button id="generateButton" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform hover:scale-105" disabled>
-                產生折扣碼
+            <button id="generateButton" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-600" disabled>
+                計算並產生折扣碼
             </button>
         </div>
 
-        <!-- 條碼顯示區 -->
         <div id="barcodeContainer" class="hidden text-center pt-4 border-t border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-700 mb-2">您的專屬折扣碼 (可驗證)</h3>
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">您的專屬折扣碼</h3>
             <svg id="barcode"></svg>
             <p id="barcodeValue" class="text-xs text-gray-500 mt-1"></p>
         </div>
 
     </div>
 
-    <!-- Firebase SDK -->
+    <!-- Supabase SDK -->
     <script type="module">
-        // 匯入 Firebase 模組
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
         // =================================================================================
-        // == 重要設定：請將此處換成您自己的 Firebase 專案設定 ==
+        // == 重要設定：請將此處換成您自己的 Supabase 專案金鑰 ==
         // =================================================================================
-        const firebaseConfig = {
-            apiKey: "AIzaSyDV71u5QGugJ8YQ79xio5sWfx2C8Q2Ja1U",
-            authDomain: "newagent-11629.firebaseapp.com",
-            databaseURL: "https://newagent-11629.firebaseio.com",
-            projectId: "newagent-11629",
-            storageBucket: "newagent-11629.firebasestorage.app",
-            messagingSenderId: "979883938338",
-            appId: "1:979883938338:web:f140c392f7432b550e307b"
-        };
+        const SUPABASE_URL = 'https://rreicuzkjhpgbmnkglzk.supabase.co'; // <--- 貼上您的 Project URL
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyZWljdXpramhwZ2JtbmtnbHprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMzNzQ1ODUsImV4cCI6MjA2ODk1MDU4NX0.gW0_mmkxtjtboRQRuM55ZcytNjSZgOqca62_qMEK3EM'; // <--- 貼上您的 anon public 金鑰
         // =================================================================================
 
         // --- DOM 元素 ---
         const elements = {
             authContainer: document.getElementById('authContainer'),
             userInfo: document.getElementById('userInfo'),
-            distanceDisplay: document.getElementById('distanceDisplay'),
-            discountDisplay: document.getElementById('discountDisplay'),
+            pointsDisplay: document.getElementById('pointsDisplay'),
             startButton: document.getElementById('startButton'),
             generateButton: document.getElementById('generateButton'),
             barcodeContainer: document.getElementById('barcodeContainer'),
@@ -137,176 +102,81 @@
         };
 
         // --- 應用程式狀態 ---
-        let app = null;
-        let auth = null;
-        let db = null;
+        let supabase = null;
         let currentUser = null;
-        let initializationStatus = 'pending'; // 'pending', 'success', 'failed'
 
         let watchId = null;
-        let totalDistance = 0;
-        let lastPosition = null;
         let isTracking = false;
-        
+        let collectedPoints = [];
+
         let map = null;
         let userMarker = null;
         let pathPolyline = null;
-        let pathCoordinates = [];
-
-        // --- 常數設定 ---
-        const METERS_PER_DISCOUNT_UNIT = 100;
-        const DISCOUNT_AMOUNT_PER_UNIT = 1;
-        const MAX_SPEED_KMH = 10; // 最高速限 (公里/小時)，用於防作弊
-        // -- NEW: 改善 GPS 漂移問題的設定 --
-        const MIN_GPS_ACCURACY = 25; // GPS 精準度要求 (公尺)，數值越小代表要求越高
-        const MIN_DISTANCE_THRESHOLD = 5; // 最小移動閥值 (公尺)，小於此距離的移動將被忽略
-
-        // --- 初始化核心邏輯 ---
-        function initializeFirebase(config) {
+        
+        // --- 初始化 ---
+        function initializeSupabase() {
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+                updateStatus('請在程式碼中填寫您的 Supabase 設定', true);
+                updateAuthUI('failed');
+                return;
+            }
             try {
-                app = initializeApp(config);
-                auth = getAuth(app);
-                db = getFirestore(app);
+                supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                 
-                onAuthStateChanged(auth, user => {
-                    if (user) {
-                        currentUser = user;
-                        elements.userInfo.textContent = `使用者ID: ${user.uid}`;
-                        elements.startButton.disabled = false;
-                    } else {
-                        currentUser = null;
-                        elements.userInfo.textContent = '尚未登入';
-                        elements.startButton.disabled = true;
-                        if(isTracking) stopTracking();
-                    }
-                    updateAuthUI();
+                supabase.auth.onAuthStateChange((event, session) => {
+                    currentUser = session?.user ?? null;
+                    updateAuthUI('success');
                 });
-                
-                initializationStatus = 'success';
-                updateStatus("", false);
-            } catch (e) {
-                console.error("Firebase 核心初始化失敗:", e);
-                updateStatus("後端服務核心初始化失敗 (Code: 3)", true);
-                initializationStatus = 'failed';
-            }
-            updateAuthUI();
-        }
 
-        // --- 啟動程序 ---
-        function runInitialization() {
-            initializationStatus = 'pending';
-            updateAuthUI();
-
-            if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
-                initializeFirebase(firebaseConfig);
-            } 
-            else if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                try {
-                    const canvasConfig = JSON.parse(__firebase_config);
-                    initializeFirebase(canvasConfig);
-                } catch(e) {
-                     updateStatus("Canvas 設定格式錯誤 (Code: 4)", true);
-                     initializationStatus = 'failed';
-                     updateAuthUI();
-                }
-            }
-            else {
-                updateStatus("請在程式碼中填寫您的 Firebase 設定 (Code: 5)", true);
-                initializationStatus = 'failed';
-                updateAuthUI();
+            } catch (error) {
+                updateStatus('Supabase 初始化失敗', true);
+                updateAuthUI('failed');
             }
         }
 
-        // --- UI 更新函式 ---
-        function updateAuthUI() {
+        // --- UI 更新 ---
+        function updateAuthUI(status) {
             elements.authContainer.innerHTML = '';
-
-            switch (initializationStatus) {
-                case 'pending': {
-                    const statusSpan = document.createElement('span');
-                    statusSpan.className = 'text-gray-500 text-sm';
-                    statusSpan.textContent = '正在連接...';
-                    elements.authContainer.appendChild(statusSpan);
-                    break;
-                }
-                case 'failed': {
-                    const retryButton = document.createElement('button');
-                    retryButton.textContent = '重試連線';
-                    retryButton.className = 'bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600';
-                    retryButton.onclick = runInitialization;
-                    elements.authContainer.appendChild(retryButton);
-                    break;
-                }
-                case 'success': {
-                    if (currentUser) {
-                        const logoutButton = document.createElement('button');
-                        logoutButton.textContent = '登出';
-                        logoutButton.className = 'bg-gray-200 text-gray-700 text-sm font-bold py-1 px-3 rounded-lg hover:bg-gray-300';
-                        logoutButton.onclick = () => signOut(auth);
-                        elements.authContainer.appendChild(logoutButton);
-                    } else {
-                        const loginButton = document.createElement('button');
-                        loginButton.textContent = '匿名登入';
-                        loginButton.className = 'bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600';
-                        loginButton.onclick = () => {
-                            signInAnonymously(auth).catch(err => {
-                                updateStatus(`登入失敗: ${err.message}`, true);
-                                console.error("Anonymous sign-in failed", err);
-                            });
-                        };
-                        elements.authContainer.appendChild(loginButton);
-                    }
-                    break;
-                }
+            if (status === 'failed') {
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'text-red-500 text-sm';
+                statusSpan.textContent = '連接失敗';
+                elements.authContainer.appendChild(statusSpan);
+                return;
+            }
+            
+            if (currentUser) {
+                elements.userInfo.textContent = `使用者ID: ${currentUser.id}`;
+                elements.startButton.disabled = false;
+                const logoutButton = document.createElement('button');
+                logoutButton.textContent = '登出';
+                logoutButton.className = 'bg-gray-200 text-gray-700 text-sm font-bold py-1 px-3 rounded-lg hover:bg-gray-300';
+                logoutButton.onclick = () => supabase.auth.signOut();
+                elements.authContainer.appendChild(logoutButton);
+            } else {
+                elements.userInfo.textContent = '尚未登入';
+                elements.startButton.disabled = true;
+                const loginButton = document.createElement('button');
+                loginButton.textContent = '匿名登入';
+                loginButton.className = 'bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600';
+                loginButton.onclick = async () => {
+                    const { error } = await supabase.auth.signInAnonymously();
+                    if (error) updateStatus(`登入失敗: ${error.message}`, true);
+                };
+                elements.authContainer.appendChild(loginButton);
             }
         }
-
+        
         function updateTrackingUI() {
-            elements.distanceDisplay.textContent = `${totalDistance.toFixed(2)} 公尺`;
-            const discount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
-            elements.discountDisplay.textContent = `NT$ ${discount}`;
+            elements.pointsDisplay.textContent = `${collectedPoints.length} 個`;
         }
 
         function updateStatus(message, isError) {
             elements.statusMessage.textContent = message;
             elements.statusMessage.style.color = isError ? '#EF4444' : '#10B981';
         }
-
-        // --- 地圖函式 ---
-        function initMap(lat, lon) {
-            if (map) return;
-            elements.mapContainer.classList.remove('hidden');
-            map = L.map('map').setView([lat, lon], 16);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            }).addTo(map);
-            
-            userMarker = L.marker([lat, lon]).addTo(map).bindPopup('你的位置').openPopup();
-            pathPolyline = L.polyline(pathCoordinates, {color: 'blue'}).addTo(map);
-        }
-
-        function updateMap(lat, lon) {
-            if (!map) {
-                initMap(lat, lon);
-            } else {
-                const newLatLng = new L.LatLng(lat, lon);
-                map.setView(newLatLng, map.getZoom());
-                userMarker.setLatLng(newLatLng);
-                pathCoordinates.push(newLatLng);
-                pathPolyline.setLatLngs(pathCoordinates);
-            }
-        }
-
-        function resetMap() {
-            elements.mapContainer.classList.add('hidden');
-            if (map) {
-                map.remove();
-                map = null;
-            }
-            pathCoordinates = [];
-        }
-
-        // --- 核心追蹤邏輯 ---
+        
+        // --- 追蹤邏輯 ---
         function startTracking() {
             if (!navigator.geolocation) {
                 updateStatus('您的瀏覽器不支援地理位置功能', true);
@@ -317,8 +187,7 @@
                 return;
             }
             
-            totalDistance = 0;
-            lastPosition = null;
+            collectedPoints = [];
             resetMap();
             updateTrackingUI();
 
@@ -326,10 +195,10 @@
             watchId = navigator.geolocation.watchPosition(handlePositionUpdate, handleError, options);
             
             isTracking = true;
-            updateStatus('正在記錄您的移動...', false);
+            updateStatus('正在收集 GPS 座標...', false);
             elements.mainCard.classList.add('tracking-active-bg');
             elements.startButton.textContent = '停止記錄';
-            elements.startButton.className = 'w-full bg-red-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500';
+            elements.startButton.className = 'w-full bg-red-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-600';
             elements.generateButton.disabled = false;
             elements.barcodeContainer.classList.add('hidden');
         }
@@ -338,127 +207,87 @@
             if (watchId) navigator.geolocation.clearWatch(watchId);
             isTracking = false;
             watchId = null;
-            updateStatus('已停止記錄', false);
+            updateStatus('已停止收集座標', false);
             elements.mainCard.classList.remove('tracking-active-bg');
             elements.startButton.textContent = '開始記錄';
-            elements.startButton.className = 'w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500';
+            elements.startButton.className = 'w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600';
         }
 
-        // -- UPDATED: 改善 GPS 漂移的核心函式 --
         function handlePositionUpdate(position) {
             const { latitude, longitude, speed, accuracy } = position.coords;
-
-            // 1. 過濾掉低精準度的訊號
-            if (accuracy > MIN_GPS_ACCURACY) {
-                updateStatus(`GPS訊號不穩定 (誤差: ${accuracy.toFixed(0)}公尺)，暫停計算`, true);
-                return;
-            }
-
-            // 2. 速度過快檢查
-            if (speed !== null && (speed * 3.6) > MAX_SPEED_KMH) {
-                 updateStatus(`偵測到過快速度 (${(speed * 3.6).toFixed(1)} km/h)，不予計算`, true);
-                 return;
-            }
-
-            const currentPosition = { latitude, longitude };
-
-            // 3. 如果是第一個點，或距離上一個點足夠遠，才進行計算
-            if (lastPosition) {
-                const distance = haversineDistance(lastPosition, currentPosition);
-
-                // 只有當移動距離大於閥值時，才累加並更新位置
-                if (distance > MIN_DISTANCE_THRESHOLD) {
-                    totalDistance += distance;
-                    updateMap(latitude, longitude);
-                    lastPosition = currentPosition; // 只有在有效移動後才更新「上一個點」
-                    updateStatus('正在記錄您的移動...', false); // 顯示正常運作訊息
-                }
-                // 如果移動距離太小，則忽略，視為漂移
-            } else {
-                // 如果是第一個點，直接記錄並更新地圖
-                lastPosition = currentPosition;
-                updateMap(latitude, longitude);
-            }
-            
-            // 無論是否為有效移動，都更新介面上的總距離顯示
+            collectedPoints.push({ latitude, longitude, speed, accuracy, timestamp: position.timestamp });
+            updateMap(latitude, longitude);
             updateTrackingUI();
         }
 
         function handleError(error) {
             stopTracking();
-            let message = '無法取得您的位置。';
-            if (error.code === 1) message = '您已拒絕位置存取權限。';
-            updateStatus(message, true);
+            updateStatus(error.code === 1 ? '您已拒絕位置存取權限。' : '無法取得您的位置。', true);
         }
-
-        // --- 折扣碼產生 ---
+        
+        // --- 折扣碼產生 (呼叫後端) ---
         async function generateBarcode() {
             if (isTracking) stopTracking();
+            if (collectedPoints.length < 2) {
+                updateStatus('座標點不足，請先移動一段距離', true);
+                return;
+            }
 
-            const finalDiscount = Math.floor(totalDistance / METERS_PER_DISCOUNT_UNIT) * DISCOUNT_AMOUNT_PER_UNIT;
-            if (finalDiscount <= 0) {
-                updateStatus('尚未累積任何折扣，無法產生條碼', true);
-                return;
-            }
-            if (!currentUser) {
-                updateStatus('請先登入以儲存您的折扣碼', true);
-                return;
-            }
+            updateStatus('正在傳送資料至伺服器安全計算...', false);
+            elements.generateButton.disabled = true;
 
             try {
-                updateStatus('正在產生並儲存折扣碼...', false);
-                const docRef = await addDoc(collection(db, "discounts"), {
-                    userId: currentUser.uid,
-                    discountAmount: finalDiscount,
-                    totalDistance: totalDistance,
-                    createdAt: serverTimestamp(),
-                    status: 'issued'
+                const { data, error } = await supabase.functions.invoke('calculateAndSaveDiscount', {
+                    body: { points: collectedPoints },
                 });
 
-                const code = docRef.id;
-                JsBarcode("#barcode", code, {
-                    format: "CODE128",
-                    lineColor: "#000",
-                    width: 2,
-                    height: 80,
-                    displayValue: false
-                });
-                
-                elements.barcodeValue.textContent = code;
-                elements.barcodeContainer.classList.remove('hidden');
-                elements.generateButton.disabled = true;
-                updateStatus('已成功產生並儲存折扣碼！', false);
+                if (error) throw error;
+
+                if (data.success) {
+                    JsBarcode("#barcode", data.barcodeId, { format: "CODE128", lineColor: "#000", width: 2, height: 80, displayValue: false });
+                    elements.barcodeValue.textContent = data.barcodeId;
+                    elements.barcodeContainer.classList.remove('hidden');
+                    updateStatus('已成功產生安全折扣碼！', false);
+                } else {
+                    updateStatus(data.message || '計算失敗，請稍後再試', true);
+                    elements.generateButton.disabled = false;
+                }
 
             } catch (error) {
-                console.error("寫入 Firestore 失敗: ", error);
-                updateStatus('儲存折扣碼失敗，請檢查網路連線', true);
+                updateStatus(`與伺服器通訊失敗: ${error.message}`, true);
+                elements.generateButton.disabled = false;
             }
         }
-
-        // --- 輔助函式 ---
-        function haversineDistance(pos1, pos2) {
-            const R = 6371e3;
-            const φ1 = pos1.latitude * Math.PI / 180;
-            const φ2 = pos2.latitude * Math.PI / 180;
-            const Δφ = (pos2.latitude - pos1.latitude) * Math.PI / 180;
-            const Δλ = (pos2.longitude - pos1.longitude) * Math.PI / 180;
-
-            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                      Math.cos(φ1) * Math.cos(φ2) *
-                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            return R * c;
+        
+        // --- 地圖與其他輔助函式 ---
+        function initMap(lat, lon) {
+            if (map) return;
+            elements.mapContainer.classList.remove('hidden');
+            map = L.map('map').setView([lat, lon], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+            userMarker = L.marker([lat, lon]).addTo(map).bindPopup('你的位置').openPopup();
+            pathPolyline = L.polyline([], {color: 'blue'}).addTo(map);
+        }
+        function updateMap(lat, lon) {
+            if (!map) initMap(lat, lon);
+            const newLatLng = new L.LatLng(lat, lon);
+            map.setView(newLatLng, map.getZoom());
+            userMarker.setLatLng(newLatLng);
+            pathPolyline.addLatLng(newLatLng);
+        }
+        function resetMap() {
+            elements.mapContainer.classList.add('hidden');
+            if (map) { map.remove(); map = null; }
         }
 
         // --- 事件監聽 ---
         elements.startButton.addEventListener('click', () => {
-            if (isTracking) stopTracking();
-            else startTracking();
+            if (isTracking) stopTracking(); else startTracking();
         });
         elements.generateButton.addEventListener('click', generateBarcode);
 
         // --- 啟動應用程式 ---
-        runInitialization();
+        initializeSupabase();
 
     </script>
 </body>
