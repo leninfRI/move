@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (進階版)</title>
+    <title>移動距離折扣產生器 (進階版V0.8)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -110,11 +110,6 @@
         // =================================================================================
         // == 重要設定：請將此處換成您自己的 Firebase 專案設定 ==
         // =================================================================================
-        // 步驟：
-        // 1. 前往 Firebase 控制台 (https://console.firebase.google.com/)
-        // 2. 建立一個新專案，或選擇現有專案
-        // 3. 在專案設定中，找到「您的應用程式」區塊，點擊「</>」圖示註冊一個新的 Web 應用程式
-        // 4. Firebase 會提供一個 firebaseConfig 物件，將其內容複製並貼到下方
         const firebaseConfig = {
             apiKey: "AIzaSyDV71u5QGugJ8YQ79xio5sWfx2C8Q2Ja1U",
             authDomain: "newagent-11629.firebaseapp.com",
@@ -159,9 +154,12 @@
         let pathCoordinates = [];
 
         // --- 常數設定 ---
-        const METERS_PER_DISCOUNT_UNIT = 10;
+        const METERS_PER_DISCOUNT_UNIT = 100;
         const DISCOUNT_AMOUNT_PER_UNIT = 1;
-        const MAX_SPEED_KMH = 30; // 最高速限 (公里/小時)，用於防作弊
+        const MAX_SPEED_KMH = 10; // 最高速限 (公里/小時)，用於防作弊
+        // -- NEW: 改善 GPS 漂移問題的設定 --
+        const MIN_GPS_ACCURACY = 25; // GPS 精準度要求 (公尺)，數值越小代表要求越高
+        const MIN_DISTANCE_THRESHOLD = 5; // 最小移動閥值 (公尺)，小於此距離的移動將被忽略
 
         // --- 初始化核心邏輯 ---
         function initializeFirebase(config) {
@@ -181,17 +179,17 @@
                         elements.startButton.disabled = true;
                         if(isTracking) stopTracking();
                     }
-                    updateAuthUI(); // 每當認證狀態改變時更新 UI
+                    updateAuthUI();
                 });
                 
                 initializationStatus = 'success';
-                updateStatus("", false); // 清除舊的錯誤訊息
+                updateStatus("", false);
             } catch (e) {
                 console.error("Firebase 核心初始化失敗:", e);
                 updateStatus("後端服務核心初始化失敗 (Code: 3)", true);
                 initializationStatus = 'failed';
             }
-            updateAuthUI(); // 更新 UI 以反映成功或失敗
+            updateAuthUI();
         }
 
         // --- 啟動程序 ---
@@ -199,11 +197,9 @@
             initializationStatus = 'pending';
             updateAuthUI();
 
-            // 優先使用手動填寫的設定
             if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
                 initializeFirebase(firebaseConfig);
             } 
-            // 其次，嘗試使用 Canvas 環境提供的設定 (用於平台內預覽)
             else if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 try {
                     const canvasConfig = JSON.parse(__firebase_config);
@@ -214,7 +210,6 @@
                      updateAuthUI();
                 }
             }
-            // 如果兩者都沒有，則顯示錯誤
             else {
                 updateStatus("請在程式碼中填寫您的 Firebase 設定 (Code: 5)", true);
                 initializationStatus = 'failed';
@@ -224,7 +219,7 @@
 
         // --- UI 更新函式 ---
         function updateAuthUI() {
-            elements.authContainer.innerHTML = ''; // 清空容器
+            elements.authContainer.innerHTML = '';
 
             switch (initializationStatus) {
                 case 'pending': {
@@ -238,7 +233,7 @@
                     const retryButton = document.createElement('button');
                     retryButton.textContent = '重試連線';
                     retryButton.className = 'bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600';
-                    retryButton.onclick = runInitialization; // 點擊重試整個初始化流程
+                    retryButton.onclick = runInitialization;
                     elements.authContainer.appendChild(retryButton);
                     break;
                 }
@@ -349,22 +344,43 @@
             elements.startButton.className = 'w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500';
         }
 
+        // -- UPDATED: 改善 GPS 漂移的核心函式 --
         function handlePositionUpdate(position) {
-            const { latitude, longitude, speed } = position.coords;
-            
+            const { latitude, longitude, speed, accuracy } = position.coords;
+
+            // 1. 過濾掉低精準度的訊號
+            if (accuracy > MIN_GPS_ACCURACY) {
+                updateStatus(`GPS訊號不穩定 (誤差: ${accuracy.toFixed(0)}公尺)，暫停計算`, true);
+                return;
+            }
+
+            // 2. 速度過快檢查
             if (speed !== null && (speed * 3.6) > MAX_SPEED_KMH) {
                  updateStatus(`偵測到過快速度 (${(speed * 3.6).toFixed(1)} km/h)，不予計算`, true);
                  return;
             }
 
-            updateMap(latitude, longitude);
+            const currentPosition = { latitude, longitude };
 
+            // 3. 如果是第一個點，或距離上一個點足夠遠，才進行計算
             if (lastPosition) {
-                const distance = haversineDistance(lastPosition, { latitude, longitude });
-                totalDistance += distance;
+                const distance = haversineDistance(lastPosition, currentPosition);
+
+                // 只有當移動距離大於閥值時，才累加並更新位置
+                if (distance > MIN_DISTANCE_THRESHOLD) {
+                    totalDistance += distance;
+                    updateMap(latitude, longitude);
+                    lastPosition = currentPosition; // 只有在有效移動後才更新「上一個點」
+                    updateStatus('正在記錄您的移動...', false); // 顯示正常運作訊息
+                }
+                // 如果移動距離太小，則忽略，視為漂移
+            } else {
+                // 如果是第一個點，直接記錄並更新地圖
+                lastPosition = currentPosition;
+                updateMap(latitude, longitude);
             }
             
-            lastPosition = { latitude, longitude };
+            // 無論是否為有效移動，都更新介面上的總距離顯示
             updateTrackingUI();
         }
 
