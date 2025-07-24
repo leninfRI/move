@@ -117,9 +117,6 @@
             mainCard: document.querySelector('.w-full.max-w-md')
         };
 
-        // --- Firebase 設定 ---
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-
         // --- 應用程式狀態 ---
         let app = null;
         let auth = null;
@@ -142,28 +139,38 @@
         const MAX_SPEED_KMH = 30; // 最高速限 (公里/小時)，用於防作弊
 
         // --- 初始化 ---
-        // FIX: Added 'function' keyword to correctly declare the function.
         async function initializeAppAndAuth() {
-            // Add a check to ensure firebaseConfig is not empty
-            if (Object.keys(firebaseConfig).length === 0) {
-                updateStatus("Firebase 設定無效，無法初始化", true);
-                console.error("Firebase config is missing or empty.");
-                return;
-            }
             try {
+                // 檢查 __firebase_config 變數是否存在
+                if (typeof __firebase_config === 'undefined') {
+                    updateStatus("Firebase 設定缺失，無法初始化 (Code: 1)", true);
+                    console.error("__firebase_config is UNDEFINED.");
+                    return;
+                }
+
+                // 解析設定檔
+                const firebaseConfig = JSON.parse(__firebase_config);
+
+                // 檢查解析後的設定檔是否有效
+                if (firebaseConfig === null || typeof firebaseConfig !== 'object' || Object.keys(firebaseConfig).length === 0) {
+                    updateStatus("Firebase 設定無效，無法初始化 (Code: 2)", true);
+                    console.error("Parsed firebaseConfig is empty or invalid:", firebaseConfig);
+                    return;
+                }
+                
+                // 初始化 Firebase App
                 app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
                 
+                // 設定認證狀態監聽器
                 onAuthStateChanged(auth, user => {
                     if (user) {
-                        // 使用者已登入
                         currentUser = user;
                         updateAuthUI(true);
                         elements.userInfo.textContent = `使用者ID: ${user.uid}`;
                         elements.startButton.disabled = false;
                     } else {
-                        // 使用者已登出
                         currentUser = null;
                         updateAuthUI(false);
                         elements.userInfo.textContent = '尚未登入';
@@ -172,14 +179,15 @@
                     }
                 });
 
-                // 自動使用提供的 token 登入
+                // 如果有提供，自動使用 token 登入
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 }
 
             } catch (e) {
                 console.error("Firebase 初始化失敗:", e);
-                updateStatus("後端服務連接失敗，請稍後再試", true);
+                // 捕捉 JSON 解析錯誤或其他初始化錯誤
+                updateStatus("後端服務連接失敗，請檢查設定 (Code: 3)", true);
             }
         }
 
@@ -219,7 +227,7 @@
 
         // --- 地圖函式 ---
         function initMap(lat, lon) {
-            if (map) return; // 如果地圖已存在，則不重複初始化
+            if (map) return;
             elements.mapContainer.classList.remove('hidden');
             map = L.map('map').setView([lat, lon], 16);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -262,7 +270,6 @@
                 return;
             }
             
-            // 重設狀態
             totalDistance = 0;
             lastPosition = null;
             resetMap();
@@ -292,13 +299,10 @@
 
         function handlePositionUpdate(position) {
             const { latitude, longitude, speed } = position.coords;
-            const currentTimestamp = position.timestamp;
-
-            // 簡易防作弊：檢查速度
-            // Geolocation API 的 speed 單位是 公尺/秒
+            
             if (speed !== null && (speed * 3.6) > MAX_SPEED_KMH) {
-                 updateStatus(`偵測到過快速度 (${(speed * 3.6).toFixed(1)} km/h)，該段距離不予計算`, true);
-                 return; // 速度太快，忽略這次更新
+                 updateStatus(`偵測到過快速度 (${(speed * 3.6).toFixed(1)} km/h)，不予計算`, true);
+                 return;
             }
 
             updateMap(latitude, longitude);
@@ -308,7 +312,7 @@
                 totalDistance += distance;
             }
             
-            lastPosition = { latitude, longitude, timestamp: currentTimestamp };
+            lastPosition = { latitude, longitude };
             updateTrackingUI();
         }
 
@@ -335,16 +339,15 @@
 
             try {
                 updateStatus('正在產生並儲存折扣碼...', false);
-                // 將折扣資料寫入 Firestore
                 const docRef = await addDoc(collection(db, "discounts"), {
                     userId: currentUser.uid,
                     discountAmount: finalDiscount,
                     totalDistance: totalDistance,
                     createdAt: serverTimestamp(),
-                    status: 'issued' // 狀態：已發行
+                    status: 'issued'
                 });
 
-                const code = docRef.id; // 使用 Firestore 文件 ID 作為可驗證的條碼
+                const code = docRef.id;
                 JsBarcode("#barcode", code, {
                     format: "CODE128",
                     lineColor: "#000",
@@ -366,7 +369,7 @@
 
         // --- 輔助函式 ---
         function haversineDistance(pos1, pos2) {
-            const R = 6371e3; // 地球半徑 (公尺)
+            const R = 6371e3;
             const φ1 = pos1.latitude * Math.PI / 180;
             const φ2 = pos2.latitude * Math.PI / 180;
             const Δφ = (pos2.latitude - pos1.latitude) * Math.PI / 180;
