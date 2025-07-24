@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (進階版V0.5)</title>
+    <title>移動距離折扣產生器 (進階版V0.6)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -99,8 +99,26 @@
     <script type="module">
         // 匯入 Firebase 模組
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // =================================================================================
+        // == 重要設定：請將此處換成您自己的 Firebase 專案設定 ==
+        // =================================================================================
+        // 步驟：
+        // 1. 前往 Firebase 控制台 (https://console.firebase.google.com/)
+        // 2. 建立一個新專案，或選擇現有專案
+        // 3. 在專案設定中，找到「您的應用程式」區塊，點擊「</>」圖示註冊一個新的 Web 應用程式
+        // 4. Firebase 會提供一個 firebaseConfig 物件，將其內容複製並貼到下方
+        const firebaseConfig = {
+            apiKey: "AIzaSyDV71u5QGugJ8YQ79xio5sWfx2C8Q2Ja1U", // <--- 換成您的金鑰
+            authDomain: "newagent-11629.firebaseapp.com", // <--- 換成您的網域
+            projectId: "newagent-11629", // <--- 換成您的專案 ID
+            storageBucket: "newagent-11629.firebasestorage.app", // <--- 換成您的儲存桶
+            messagingSenderId: "979883938338", // <--- 換成您的寄件者 ID
+            appId: "1:979883938338:web:f140c392f7432b550e307b" // <--- 換成您的應用程式 ID
+        };
+        // =================================================================================
 
         // --- DOM 元素 ---
         const elements = {
@@ -157,57 +175,45 @@
                         elements.startButton.disabled = true;
                         if(isTracking) stopTracking();
                     }
-                    updateAuthUI(); // Update UI whenever auth state changes
+                    updateAuthUI(); // 每當認證狀態改變時更新 UI
                 });
-
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    signInWithCustomToken(auth, __initial_auth_token);
-                }
                 
                 initializationStatus = 'success';
-                updateStatus("", false); // Clear any previous errors
+                updateStatus("", false); // 清除舊的錯誤訊息
             } catch (e) {
-                console.error("Firebase Core Initialization Failed:", e);
+                console.error("Firebase 核心初始化失敗:", e);
                 updateStatus("後端服務核心初始化失敗 (Code: 3)", true);
                 initializationStatus = 'failed';
             }
+            updateAuthUI(); // 更新 UI 以反映成功或失敗
         }
 
-        // --- 啟動程序 (包含等待和重試) ---
+        // --- 啟動程序 ---
         function runInitialization() {
             initializationStatus = 'pending';
-            updateAuthUI(); // Show "Connecting..." message
+            updateAuthUI();
 
-            let attempts = 0;
-            const maxAttempts = 50; // 5 seconds timeout
-
-            const intervalId = setInterval(() => {
-                attempts++;
-
-                // 檢查設定檔是否已載入
-                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                    clearInterval(intervalId);
-                    try {
-                        const firebaseConfig = JSON.parse(__firebase_config);
-                        if (firebaseConfig && typeof firebaseConfig === 'object' && Object.keys(firebaseConfig).length > 0) {
-                            initializeFirebase(firebaseConfig);
-                        } else {
-                            updateStatus("Firebase 設定無效 (Code: 2)", true);
-                            initializationStatus = 'failed';
-                        }
-                    } catch (e) {
-                        updateStatus("Firebase 設定格式錯誤 (Code: 3)", true);
-                        initializationStatus = 'failed';
-                    }
-                    updateAuthUI(); // Update UI after success or failure
-                } else if (attempts > maxAttempts) {
-                    // 超時處理
-                    clearInterval(intervalId);
-                    updateStatus("無法載入後端設定，請重試 (Code: 1)", true);
-                    initializationStatus = 'failed';
-                    updateAuthUI(); // Update UI on timeout
+            // 優先使用手動填寫的設定
+            if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+                initializeFirebase(firebaseConfig);
+            } 
+            // 其次，嘗試使用 Canvas 環境提供的設定 (用於平台內預覽)
+            else if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                try {
+                    const canvasConfig = JSON.parse(__firebase_config);
+                    initializeFirebase(canvasConfig);
+                } catch(e) {
+                     updateStatus("Canvas 設定格式錯誤 (Code: 4)", true);
+                     initializationStatus = 'failed';
+                     updateAuthUI();
                 }
-            }, 100);
+            }
+            // 如果兩者都沒有，則顯示錯誤
+            else {
+                updateStatus("請在程式碼中填寫您的 Firebase 設定 (Code: 5)", true);
+                initializationStatus = 'failed';
+                updateAuthUI();
+            }
         }
 
         // --- UI 更新函式 ---
