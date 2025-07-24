@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (進階版)</title>
+    <title>移動距離折扣產生器 (進階版V0.4)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -122,6 +122,7 @@
         let auth = null;
         let db = null;
         let currentUser = null;
+        let isFirebaseInitialized = false; // 新增：追蹤 Firebase 初始化狀態
 
         let watchId = null;
         let totalDistance = 0;
@@ -140,6 +141,8 @@
 
         // --- 初始化 ---
         async function initializeAppAndAuth() {
+            // 重置初始化狀態
+            isFirebaseInitialized = false;
             try {
                 // 檢查 __firebase_config 變數是否存在
                 if (typeof __firebase_config === 'undefined') {
@@ -183,11 +186,16 @@
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 }
+                
+                // 標記為初始化成功
+                isFirebaseInitialized = true;
+                updateStatus("", false); // 清除舊的錯誤訊息
 
             } catch (e) {
                 console.error("Firebase 初始化失敗:", e);
                 // 捕捉 JSON 解析錯誤或其他初始化錯誤
                 updateStatus("後端服務連接失敗，請檢查設定 (Code: 3)", true);
+                isFirebaseInitialized = false;
             }
         }
 
@@ -204,11 +212,19 @@
                 const loginButton = document.createElement('button');
                 loginButton.textContent = '匿名登入';
                 loginButton.className = 'bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600';
-                loginButton.onclick = () => {
-                    signInAnonymously(auth).catch(err => {
-                        updateStatus(`登入失敗: ${err.message}`, true)
-                        console.error("Anonymous sign-in failed", err);
-                    });
+                // 修改：點擊登入按鈕時，如果先前初始化失敗，則重試
+                loginButton.onclick = async () => {
+                    // 如果 Firebase 尚未初始化成功，則再次嘗試
+                    if (!isFirebaseInitialized) {
+                        await initializeAppAndAuth();
+                    }
+                    // 再次檢查是否已成功，若成功則執行登入
+                    if (isFirebaseInitialized) {
+                        signInAnonymously(auth).catch(err => {
+                            updateStatus(`登入失敗: ${err.message}`, true)
+                            console.error("Anonymous sign-in failed", err);
+                        });
+                    }
                 }
                 elements.authContainer.appendChild(loginButton);
             }
