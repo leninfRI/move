@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (進階版V0.6)</title>
+    <title>移動距離折扣產生器 (進階版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -29,6 +29,11 @@
             width: 100%;
             border-radius: 0.75rem; /* rounded-xl */
             border: 1px solid #e5e7eb; /* border-gray-200 */
+        }
+        /* -- FIX: 讓條碼 SVG 響應式縮放 -- */
+        #barcode {
+            width: 100%;
+            height: auto;
         }
         /* 自訂動畫 */
         @keyframes pulse-bg {
@@ -111,12 +116,12 @@
         // 3. 在專案設定中，找到「您的應用程式」區塊，點擊「</>」圖示註冊一個新的 Web 應用程式
         // 4. Firebase 會提供一個 firebaseConfig 物件，將其內容複製並貼到下方
         const firebaseConfig = {
-            apiKey: "AIzaSyDV71u5QGugJ8YQ79xio5sWfx2C8Q2Ja1U", // <--- 換成您的金鑰
-            authDomain: "newagent-11629.firebaseapp.com", // <--- 換成您的網域
-            projectId: "newagent-11629", // <--- 換成您的專案 ID
-            storageBucket: "newagent-11629.firebasestorage.app", // <--- 換成您的儲存桶
-            messagingSenderId: "979883938338", // <--- 換成您的寄件者 ID
-            appId: "1:979883938338:web:f140c392f7432b550e307b" // <--- 換成您的應用程式 ID
+            apiKey: "YOUR_API_KEY", // <--- 換成您的金鑰
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com", // <--- 換成您的網域
+            projectId: "YOUR_PROJECT_ID", // <--- 換成您的專案 ID
+            storageBucket: "YOUR_PROJECT_ID.appspot.com", // <--- 換成您的儲存桶
+            messagingSenderId: "YOUR_SENDER_ID", // <--- 換成您的寄件者 ID
+            appId: "YOUR_APP_ID" // <--- 換成您的應用程式 ID
         };
         // =================================================================================
 
