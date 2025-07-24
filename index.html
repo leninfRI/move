@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (進階版V0.4)</title>
+    <title>移動距離折扣產生器 (進階版V0.5)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -51,7 +51,7 @@
                 <p class="text-gray-500 mt-1">開始移動，累積您的專屬折扣！</p>
             </div>
             <div id="authContainer" class="text-right">
-                 <!-- 登入/登出按鈕會被動態插入這裡 -->
+                 <span class="text-gray-500 text-sm">正在連接後端服務...</span>
             </div>
         </div>
         <div id="userInfo" class="text-xs text-gray-400 truncate">尚未登入</div>
@@ -122,7 +122,7 @@
         let auth = null;
         let db = null;
         let currentUser = null;
-        let isFirebaseInitialized = false; // 新增：追蹤 Firebase 初始化狀態
+        let initializationStatus = 'pending'; // 'pending', 'success', 'failed'
 
         let watchId = null;
         let totalDistance = 0;
@@ -139,94 +139,118 @@
         const DISCOUNT_AMOUNT_PER_UNIT = 1;
         const MAX_SPEED_KMH = 30; // 最高速限 (公里/小時)，用於防作弊
 
-        // --- 初始化 ---
-        async function initializeAppAndAuth() {
-            // 重置初始化狀態
-            isFirebaseInitialized = false;
+        // --- 初始化核心邏輯 ---
+        function initializeFirebase(config) {
             try {
-                // 檢查 __firebase_config 變數是否存在
-                if (typeof __firebase_config === 'undefined') {
-                    updateStatus("Firebase 設定缺失，無法初始化 (Code: 1)", true);
-                    console.error("__firebase_config is UNDEFINED.");
-                    return;
-                }
-
-                // 解析設定檔
-                const firebaseConfig = JSON.parse(__firebase_config);
-
-                // 檢查解析後的設定檔是否有效
-                if (firebaseConfig === null || typeof firebaseConfig !== 'object' || Object.keys(firebaseConfig).length === 0) {
-                    updateStatus("Firebase 設定無效，無法初始化 (Code: 2)", true);
-                    console.error("Parsed firebaseConfig is empty or invalid:", firebaseConfig);
-                    return;
-                }
-                
-                // 初始化 Firebase App
-                app = initializeApp(firebaseConfig);
+                app = initializeApp(config);
                 auth = getAuth(app);
                 db = getFirestore(app);
                 
-                // 設定認證狀態監聽器
                 onAuthStateChanged(auth, user => {
                     if (user) {
                         currentUser = user;
-                        updateAuthUI(true);
                         elements.userInfo.textContent = `使用者ID: ${user.uid}`;
                         elements.startButton.disabled = false;
                     } else {
                         currentUser = null;
-                        updateAuthUI(false);
                         elements.userInfo.textContent = '尚未登入';
                         elements.startButton.disabled = true;
                         if(isTracking) stopTracking();
                     }
+                    updateAuthUI(); // Update UI whenever auth state changes
                 });
 
-                // 如果有提供，自動使用 token 登入
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
+                    signInWithCustomToken(auth, __initial_auth_token);
                 }
                 
-                // 標記為初始化成功
-                isFirebaseInitialized = true;
-                updateStatus("", false); // 清除舊的錯誤訊息
-
+                initializationStatus = 'success';
+                updateStatus("", false); // Clear any previous errors
             } catch (e) {
-                console.error("Firebase 初始化失敗:", e);
-                // 捕捉 JSON 解析錯誤或其他初始化錯誤
-                updateStatus("後端服務連接失敗，請檢查設定 (Code: 3)", true);
-                isFirebaseInitialized = false;
+                console.error("Firebase Core Initialization Failed:", e);
+                updateStatus("後端服務核心初始化失敗 (Code: 3)", true);
+                initializationStatus = 'failed';
             }
         }
 
-        // --- UI 更新函式 ---
-        function updateAuthUI(isLoggedIn) {
-            elements.authContainer.innerHTML = ''; // 清空容器
-            if (isLoggedIn) {
-                const logoutButton = document.createElement('button');
-                logoutButton.textContent = '登出';
-                logoutButton.className = 'bg-gray-200 text-gray-700 text-sm font-bold py-1 px-3 rounded-lg hover:bg-gray-300';
-                logoutButton.onclick = () => signOut(auth);
-                elements.authContainer.appendChild(logoutButton);
-            } else {
-                const loginButton = document.createElement('button');
-                loginButton.textContent = '匿名登入';
-                loginButton.className = 'bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600';
-                // 修改：點擊登入按鈕時，如果先前初始化失敗，則重試
-                loginButton.onclick = async () => {
-                    // 如果 Firebase 尚未初始化成功，則再次嘗試
-                    if (!isFirebaseInitialized) {
-                        await initializeAppAndAuth();
+        // --- 啟動程序 (包含等待和重試) ---
+        function runInitialization() {
+            initializationStatus = 'pending';
+            updateAuthUI(); // Show "Connecting..." message
+
+            let attempts = 0;
+            const maxAttempts = 50; // 5 seconds timeout
+
+            const intervalId = setInterval(() => {
+                attempts++;
+
+                // 檢查設定檔是否已載入
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    clearInterval(intervalId);
+                    try {
+                        const firebaseConfig = JSON.parse(__firebase_config);
+                        if (firebaseConfig && typeof firebaseConfig === 'object' && Object.keys(firebaseConfig).length > 0) {
+                            initializeFirebase(firebaseConfig);
+                        } else {
+                            updateStatus("Firebase 設定無效 (Code: 2)", true);
+                            initializationStatus = 'failed';
+                        }
+                    } catch (e) {
+                        updateStatus("Firebase 設定格式錯誤 (Code: 3)", true);
+                        initializationStatus = 'failed';
                     }
-                    // 再次檢查是否已成功，若成功則執行登入
-                    if (isFirebaseInitialized) {
-                        signInAnonymously(auth).catch(err => {
-                            updateStatus(`登入失敗: ${err.message}`, true)
-                            console.error("Anonymous sign-in failed", err);
-                        });
-                    }
+                    updateAuthUI(); // Update UI after success or failure
+                } else if (attempts > maxAttempts) {
+                    // 超時處理
+                    clearInterval(intervalId);
+                    updateStatus("無法載入後端設定，請重試 (Code: 1)", true);
+                    initializationStatus = 'failed';
+                    updateAuthUI(); // Update UI on timeout
                 }
-                elements.authContainer.appendChild(loginButton);
+            }, 100);
+        }
+
+        // --- UI 更新函式 ---
+        function updateAuthUI() {
+            elements.authContainer.innerHTML = ''; // 清空容器
+
+            switch (initializationStatus) {
+                case 'pending': {
+                    const statusSpan = document.createElement('span');
+                    statusSpan.className = 'text-gray-500 text-sm';
+                    statusSpan.textContent = '正在連接...';
+                    elements.authContainer.appendChild(statusSpan);
+                    break;
+                }
+                case 'failed': {
+                    const retryButton = document.createElement('button');
+                    retryButton.textContent = '重試連線';
+                    retryButton.className = 'bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600';
+                    retryButton.onclick = runInitialization; // 點擊重試整個初始化流程
+                    elements.authContainer.appendChild(retryButton);
+                    break;
+                }
+                case 'success': {
+                    if (currentUser) {
+                        const logoutButton = document.createElement('button');
+                        logoutButton.textContent = '登出';
+                        logoutButton.className = 'bg-gray-200 text-gray-700 text-sm font-bold py-1 px-3 rounded-lg hover:bg-gray-300';
+                        logoutButton.onclick = () => signOut(auth);
+                        elements.authContainer.appendChild(logoutButton);
+                    } else {
+                        const loginButton = document.createElement('button');
+                        loginButton.textContent = '匿名登入';
+                        loginButton.className = 'bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600';
+                        loginButton.onclick = () => {
+                            signInAnonymously(auth).catch(err => {
+                                updateStatus(`登入失敗: ${err.message}`, true);
+                                console.error("Anonymous sign-in failed", err);
+                            });
+                        };
+                        elements.authContainer.appendChild(loginButton);
+                    }
+                    break;
+                }
             }
         }
 
@@ -406,7 +430,7 @@
         elements.generateButton.addEventListener('click', generateBarcode);
 
         // --- 啟動應用程式 ---
-        initializeAppAndAuth();
+        runInitialization();
 
     </script>
 </body>
