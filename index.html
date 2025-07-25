@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (V0.11)</title>
+    <title>移動距離折扣產生器 (V0.12)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -102,14 +102,13 @@
             barcodeContainer: document.getElementById('barcodeContainer'),
             barcodeValue: document.getElementById('barcodeValue'),
             statusMessage: document.getElementById('statusMessage'),
-            mapContainer: document.getElementById('mapContainer'),
+            mainCard: document.querySelector('.w-full.max-w-md'),
         };
 
         // --- 應用程式狀態 ---
         let supabase = null;
         let currentUser = null;
         
-        // NEW: 用於儲存從後端讀取的動態設定
         let appSettings = {
             METERS_PER_DISCOUNT_UNIT: 10,
             DISCOUNT_AMOUNT_PER_UNIT: 1,
@@ -127,8 +126,8 @@
         let userMarker = null;
         let pathPolyline = null;
         
-        // --- 初始化 ---
-        async function initializeSupabase() {
+        // --- 初始化 (已重構) ---
+        async function initializeApp() {
             if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL === 'YOUR_SUPABASE_URL') {
                 updateStatus('請在程式碼中填寫您的 Supabase 設定', true);
                 updateAuthUI('failed');
@@ -137,11 +136,16 @@
             try {
                 supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                 
-                // 監聽認證狀態變化
-                supabase.auth.onAuthStateChange(async (event, session) => {
+                // 1. 主動獲取初始連線階段
+                await handleInitialSession();
+
+                // 2. 設定監聽器，以處理後續的登入/登出事件
+                supabase.auth.onAuthStateChange(async (_event, session) => {
+                    const userJustChanged = currentUser?.id !== session?.user?.id;
                     currentUser = session?.user ?? null;
-                    if (currentUser) {
-                        // 登入後，嘗試從後端獲取最新設定
+                    
+                    // 只有當使用者狀態真的發生變化時，才重新獲取設定
+                    if (userJustChanged && currentUser) {
                         await fetchAppSettings();
                     }
                     updateAuthUI('success');
@@ -153,7 +157,28 @@
             }
         }
 
-        // NEW: 從後端讀取應用程式設定
+        // NEW: 處理初始連線階段的專用函式
+        async function handleInitialSession() {
+            updateStatus('正在恢復連線階段...', false);
+            const { data: { session }, error } = await supabase.auth.getSession();
+
+            if (error) {
+                updateStatus('恢復連線階段失敗', true);
+                currentUser = null;
+            } else {
+                currentUser = session?.user ?? null;
+            }
+
+            // 如果有成功恢復連線，則立即獲取後台設定
+            if (currentUser) {
+                await fetchAppSettings();
+            }
+
+            // 最後更新一次 UI
+            updateAuthUI('success');
+        }
+
+        // 從後端讀取應用程式設定
         async function fetchAppSettings() {
             if (!supabase || !currentUser) return;
             
@@ -164,7 +189,6 @@
                 updateStatus('讀取後台設定失敗，將使用預設值', true);
                 console.error('Fetch settings error:', error);
             } else if (data) {
-                // 將讀取到的設定更新到 appSettings 物件中
                 data.forEach(setting => {
                     appSettings[setting.key] = parseFloat(setting.value) || setting.value;
                 });
@@ -207,7 +231,6 @@
         
         function updateTrackingUI() {
             elements.distanceDisplay.textContent = `${totalDistance.toFixed(2)} 公尺`;
-            // 使用從後端讀取的動態設定來計算預估折扣
             const discount = Math.floor(totalDistance / appSettings.METERS_PER_DISCOUNT_UNIT) * appSettings.DISCOUNT_AMOUNT_PER_UNIT;
             elements.discountDisplay.textContent = `NT$ ${discount}`;
         }
@@ -239,6 +262,7 @@
             
             isTracking = true;
             updateStatus('正在記錄您的移動...', false);
+            elements.mainCard.classList.add('tracking-active-bg');
             elements.startButton.textContent = '停止記錄';
             elements.startButton.className = 'w-full bg-red-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-600';
             elements.generateButton.disabled = false;
@@ -250,6 +274,7 @@
             isTracking = false;
             watchId = null;
             updateStatus('已停止記錄', false);
+            elements.mainCard.classList.remove('tracking-active-bg');
             elements.startButton.textContent = '開始記錄';
             elements.startButton.className = 'w-full bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-emerald-600';
         }
@@ -258,7 +283,6 @@
             const { latitude, longitude, speed, accuracy, timestamp } = position.coords;
             collectedPoints.push({ latitude, longitude, speed, accuracy, timestamp });
             
-            // 使用從後端讀取的動態設定來進行前端預估
             if (accuracy > appSettings.MIN_GPS_ACCURACY) {
                 updateStatus(`GPS訊號不穩定 (誤差: ${accuracy.toFixed(0)}公尺)，暫停計算`, true);
                 return;
@@ -336,7 +360,8 @@
 
         function initMap(lat, lon) {
             if (map) return;
-            elements.mapContainer.classList.remove('hidden');
+            const mapContainer = document.getElementById('mapContainer');
+            mapContainer.classList.remove('hidden');
             map = L.map('map').setView([lat, lon], 16);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
             userMarker = L.marker([lat, lon]).addTo(map).bindPopup('你的位置').openPopup();
@@ -350,8 +375,9 @@
             pathPolyline.addLatLng(newLatLng);
         }
         function resetMap() {
-            elements.mapContainer.classList.add('hidden');
+            const mapContainer = document.getElementById('mapContainer');
             if (map) { map.remove(); map = null; }
+            mapContainer.classList.add('hidden');
         }
 
         // --- 事件監聽 ---
@@ -361,7 +387,7 @@
         elements.generateButton.addEventListener('click', generateBarcode);
 
         // --- 啟動應用程式 ---
-        initializeSupabase();
+        initializeApp();
 
     </script>
 </body>
