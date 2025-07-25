@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>移動距離折扣產生器 (V0.13)</title>
+    <title>移動距離折扣產生器 (V0.14)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -116,13 +116,13 @@
             DISCOUNT_AMOUNT_PER_UNIT: 1,
             MIN_GPS_ACCURACY: 25,
             MIN_DISTANCE_THRESHOLD: 5,
-            MIN_DURATION_SECONDS: 3,
         };
 
         let watchId = null;
         let isTracking = false;
         let collectedPoints = [];
         let totalDistance = 0;
+        let lastPosition = null; // 用於前端計算
 
         let map = null;
         let userMarker = null;
@@ -243,6 +243,7 @@
             
             collectedPoints = [];
             totalDistance = 0;
+            lastPosition = null;
             resetMap();
             updateTrackingUI();
 
@@ -270,29 +271,31 @@
             const { latitude, longitude, speed, accuracy, timestamp } = position.coords;
             const currentPoint = { latitude, longitude, speed, accuracy, timestamp };
             
-            // 只有在有前一個點時，才進行計算
-            if (collectedPoints.length > 0) {
-                const prevPoint = collectedPoints[collectedPoints.length - 1];
-                
-                if (accuracy > appSettings.MIN_GPS_ACCURACY) {
-                    updateStatus(`GPS訊號不穩定 (誤差: ${accuracy.toFixed(0)}m)，暫停計算`, true);
-                    return;
-                }
+            // 收集所有點，用於後端驗證
+            collectedPoints.push(currentPoint);
 
-                const distance = haversineDistance(prevPoint, currentPoint);
-                const timeDiff = (currentPoint.timestamp - prevPoint.timestamp) / 1000; // 秒
+            // --- 前端預估計算 (採用新版邏輯) ---
+            if (accuracy > appSettings.MIN_GPS_ACCURACY) {
+                updateStatus(`GPS訊號不穩定 (誤差: ${accuracy.toFixed(0)}m)，暫停計算`, true);
+                return;
+            }
 
-                if (distance > appSettings.MIN_DISTANCE_THRESHOLD && timeDiff > appSettings.MIN_DURATION_SECONDS) {
+            const currentPosition = { latitude, longitude };
+
+            if (lastPosition) {
+                const distance = haversineDistance(lastPosition, currentPosition);
+                if (distance > appSettings.MIN_DISTANCE_THRESHOLD) {
                     totalDistance += distance;
+                    lastPosition = currentPosition; // 更新上一個點
                     updateMap(latitude, longitude);
                     updateStatus('正在記錄您的移動...', false);
                 }
             } else {
-                // 第一個點，直接更新地圖
+                // 第一個點
+                lastPosition = currentPosition;
                 updateMap(latitude, longitude);
             }
             
-            collectedPoints.push(currentPoint);
             updateTrackingUI();
         }
 
@@ -320,7 +323,6 @@
                 if (error) throw error;
 
                 if (data.success) {
-                    // **核心修改：使用後端回傳的最終結果更新 UI**
                     updateTrackingUI(true, { distance: data.finalDistance, discount: data.finalDiscount });
 
                     JsBarcode("#barcode", data.barcodeId, { format: "CODE128", lineColor: "#000", width: 2, height: 80, displayValue: false });
